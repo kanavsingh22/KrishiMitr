@@ -1,0 +1,7 @@
+Flask
+Flask-Cors
+sentence-transformers
+torch
+pandas
+numpy
+googletrans==4.0.0-rc1
