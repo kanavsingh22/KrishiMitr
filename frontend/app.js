@@ -1,11 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- Constants & State ---
     const API_URL = 'http://127.0.0.1:5000';
-    const DB_NAME = 'KrishiMitrDB';
-    const DB_VERSION = 1;
-    const STORE_NAME = 'knowledge_base';
+    const DB_NAME = 'KrishiMitrDB', DB_VERSION = 1, STORE_NAME = 'knowledge_base';
     let db;
     let isRecording = false;
+    let offlineIndex; // For FlexSearch
 
     // --- DOM Elements ---
     const queryInput = document.getElementById('query-input');
@@ -18,12 +17,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const syncStatus = document.getElementById('sync-status');
     const voiceStatus = document.getElementById('voice-status');
     
-    // --- Conversational & Language Detection Layer ---
+    // --- Conversational & Language Detection ---
     const CONVERSATIONAL_RESPONSES = {
-        greetings: { keywords: ["hello", "hi", "hey", "namaste", "नमस्ते", "namaskar", "नमस्कार"], en: "Hello! I am KrishiMitr. How can I help you today?", hi: "नमस्ते! मैं कृषि मित्र हूँ। मैं आज आपकी कैसे मदद कर सकता हूँ?" },
-        thanks: { keywords: ["thank you", "thanks", "dhanyavad", "धन्यवाद", "shukriya", "शुक्रिया"], en: "You're welcome!", hi: "आपका स्वागत है!" }
+        greetings: { keywords: ["hello", "hi", "hey", "namaste", "नमस्ते"], en: "Hello! How can I help?", hi: "नमस्ते! मैं कैसे मदद कर सकता हूँ?" },
     };
-    const HINGLISH_KEYWORDS = ['bhav', 'kya', 'kaise', 'kyu', 'mein', 'hai', 'kaha', 'tamatar', 'pyaz', 'gehu', 'kapas', 'ganna', 'mausam', 'yojana', 'dava'];
+    const HINGLISH_KEYWORDS = ['bhav', 'kya', 'kaise', 'mein', 'hai', 'tamatar', 'pyaz', 'gehu', 'mausam', 'yojana', 'dava'];
+    const OFFLINE_ERROR_MESSAGES = {
+        en: "I couldn't find an answer in your offline data. Please connect to the internet for a live search.",
+        hi: "मुझे आपके ऑफ़लाइन डेटा में कोई उत्तर नहीं मिला। कृपया लाइव खोज के लिए इंटरनेट से कनेक्ट करें।"
+    };
     
     function detectLanguageOffline(query) {
         if (/[\u0900-\u097F]/.test(query)) return 'hi';
@@ -32,63 +34,78 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'en';
     }
 
-    // --- IndexedDB & Data Sync ---
+    // --- IndexedDB & FlexSearch for the DYNAMIC "Learning" Database ---
+    function initializeOfflineIndex() {
+        offlineIndex = new FlexSearch.Document({
+            document: { id: "id", index: ["query_en", "answer_en"] }, // Index both questions and answers
+            tokenize: "forward"
+        });
+    }
+
     function initDB() {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onupgradeneeded = e => e.target.result.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
-        request.onsuccess = e => { db = e.target.result; updateOnlineStatus(); };
-        request.onerror = e => { console.error('DB error:', e.target.errorCode); syncStatus.textContent = 'Error: Offline data unavailable.'; };
+        request.onupgradeneeded = e => {
+            const store = e.target.result.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+            store.createIndex('query_en', 'query_en', { unique: true }); // Index queries for faster searching
+        };
+        request.onsuccess = e => {
+            db = e.target.result;
+            // Load existing data from DB into FlexSearch index on startup
+            loadDBDataIntoIndex();
+            updateOnlineStatus();
+        };
+        request.onerror = e => { console.error('DB error:', e.target.errorCode); };
     }
-
-    async function syncKnowledgeBase() {
-        if (!navigator.onLine || !db) return;
-        syncStatus.textContent = 'Syncing data for offline use...';
-        try {
-            const response = await fetch(`${API_URL}/api/knowledge-base`);
-            if (!response.ok) throw new Error('Failed to fetch data.');
-            const data = await response.json();
-            const transaction = db.transaction(STORE_NAME, 'readwrite');
-            const store = transaction.objectStore(STORE_NAME);
-            store.clear();
-            data.forEach(item => store.add(item));
-            transaction.oncomplete = () => syncStatus.textContent = 'Offline data is ready.';
-        } catch (error) {
-            syncStatus.textContent = 'Offline data sync failed.';
-            console.error('Sync failed:', error);
-        }
-    }
-
-    // --- Offline Search ---
-    function performOfflineSearch(query, detectedLang) {
-        if (!db) { addMessage("Offline database isn't ready.", 'error'); return; }
-        
-        let processedQuery = query.toLowerCase();
-        const hindiToEnglishKeywords = { 'भाव': 'price', 'कीमत': 'price', 'दाम': 'price', 'मौसम': 'weather', 'योजना': 'scheme', 'दवा': 'pest control', 'कीट': 'pest', 'खाद': 'fertilizer', 'मिट्टी': 'soil', 'चावल': 'rice', 'गेहूं': 'wheat', 'कपास': 'cotton', 'गन्ना': 'sugarcane', 'क्या है': '' };
-        for (const [hindi, english] of Object.entries(hindiToEnglishKeywords)) {
-            processedQuery = processedQuery.replace(new RegExp(hindi, 'g'), english);
-        }
-        
+    
+    async function loadDBDataIntoIndex() {
+        if (!db) return;
         const transaction = db.transaction(STORE_NAME, 'readonly');
         const store = transaction.objectStore(STORE_NAME);
         store.getAll().onsuccess = e => {
-            const knowledgeBase = e.target.result;
-            const queryWords = processedQuery.split(/\s+/).filter(w => w.length > 2);
-            let bestMatch = null, maxScore = 0;
-
-            knowledgeBase.forEach(item => {
-                let score = 0;
-                const content = item.content.toLowerCase();
-                queryWords.forEach(word => { if (content.includes(word)) score++; });
-                if (score > maxScore) { maxScore = score; bestMatch = item; }
-            });
-
-            if (bestMatch && maxScore > 0) {
-                const answer = (detectedLang === 'hi' && bestMatch.content_hi) ? bestMatch.content_hi : bestMatch.content;
-                updateBotMessage({ answer, sources: [bestMatch.source], offlineDisclaimer: `(Offline Result)` }, `offline-${Date.now()}`, true);
-            } else {
-                addMessage("I couldn't find an answer in your offline data.", 'bot');
-            }
+            const data = e.target.result;
+            offlineIndex.clear();
+            data.forEach(doc => offlineIndex.add(doc));
+            console.log(`${data.length} offline records loaded into search index.`);
+            syncStatus.textContent = `Offline data ready (${data.length} records).`;
         };
+    }
+
+    // --- NEW: Function to save online results to the learning database ---
+    function cacheResponseToDB(response) {
+        if (!db || !response.query_en || !response.answer_en) return;
+        const transaction = db.transaction(STORE_NAME, 'readwrite');
+        const store = transaction.objectStore(STORE_NAME);
+        const newRecord = {
+            query_en: response.query_en,
+            answer_en: response.answer_en,
+            answer_hi: response.answer_hi,
+            source: response.sources[0] || 'Web',
+            hash: response.cache_hash
+        };
+        // Add the new record. The 'id' will be auto-incremented.
+        const request = store.add(newRecord);
+        request.onsuccess = () => {
+            console.log("Successfully cached new response to IndexedDB.");
+            // Add the new record to the live search index as well
+            offlineIndex.add(newRecord);
+        };
+        request.onerror = (e) => {
+            console.error("Error caching response to IndexedDB:", e.target.error);
+        };
+    }
+
+    // --- Offline Search (now uses the dynamic learning database) ---
+    function performOfflineSearch(query, detectedLang) {
+        if (!offlineIndex) { addMessage("Offline data is not ready.", 'error'); return; }
+        
+        const searchResults = offlineIndex.search(query, { limit: 1, enrich: true });
+        if (searchResults.length > 0 && searchResults[0].result.length > 0) {
+            const bestMatch = searchResults[0].result[0].doc;
+            const answer = (detectedLang === 'hi' && bestMatch.answer_hi) ? bestMatch.answer_hi : bestMatch.answer_en;
+            updateBotMessage({ answer, sources: [bestMatch.source], offlineDisclaimer: `(From your device's data)` }, `offline-${Date.now()}`, true);
+        } else {
+            addMessage(OFFLINE_ERROR_MESSAGES[detectedLang], 'error');
+        }
     }
 
     // --- Main Query Handler ---
@@ -119,12 +136,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Server error');
             updateBotMessage(data, loadingId);
+            cacheResponseToDB(data); // <-- Learn from the online response
         } catch (error) {
             updateBotMessage({ answer: `Error: ${error.message}` }, loadingId);
         }
     };
     
-    // --- COMPLETE UI UPDATE FUNCTIONS (RESTORED) ---
+    // --- UI, Event Listeners & Helper Functions ---
     const addMessage = (text, sender, isLoading = false, messageId = null) => {
         const el = document.createElement('div');
         if (messageId) el.id = messageId;
@@ -138,32 +156,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const updateBotMessage = (data, messageId, isOffline = false) => {
         let el = document.getElementById(messageId);
-        if (!el) {
-            el = document.createElement('div');
-            el.id = messageId;
-            el.className = 'message bot';
-            chatMessages.appendChild(el);
-        }
+        if (!el) { el = document.createElement('div'); el.id = messageId; el.className = 'message bot'; chatMessages.appendChild(el); }
         el.classList.remove('loading');
-        el.innerHTML = `
-            <p>${data.answer}</p>
-            ${data.sources ? `<div class="sources"><strong>Sources:</strong> ${data.sources.join(', ')}</div>` : ''}
-            ${data.evidence_hash ? `<div class="verification"><strong>Verified Hash:</strong> ${data.evidence_hash}</div>` : ''}
-            ${isOffline ? `<span class="offline-disclaimer">${data.offlineDisclaimer}</span>` : ''}
-        `;
+        // Use innerHTML to render bold tags from the backend
+        el.innerHTML = `<p>${data.answer.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')}</p>${data.sources ? `<div class="sources"><strong>Sources:</strong> ${data.sources.join(', ')}</div>` : ''}${data.cache_hash ? `<div class="verification"><strong>Verified Hash:</strong> ${data.cache_hash.substring(0, 20)}...</div>` : ''}${isOffline ? `<span class="offline-disclaimer">${data.offlineDisclaimer}</span>` : ''}`;
         chatWindow.scrollTop = chatWindow.scrollHeight;
     };
 
-    // --- COMPLETE EVENT LISTENERS & INITIALIZERS (RESTORED) ---
     const updateOnlineStatus = () => {
         const isOnline = navigator.onLine;
         statusDot.className = isOnline ? 'online' : 'offline';
         statusText.textContent = isOnline ? 'Online' : 'Offline';
-        if (isOnline) { 
-            syncKnowledgeBase(); 
-        } else { 
-            syncStatus.textContent = 'Offline mode. Answers are from local data.'; 
-        }
+        if (!isOnline) { syncStatus.textContent = 'Offline mode.'; }
     };
 
     sendButton.addEventListener('click', () => sendQuery(queryInput.value));
@@ -176,24 +180,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const recognition = new SpeechRecognition();
         recognition.continuous = false;
         recognition.interimResults = false;
-
         recognition.onstart = () => { isRecording = true; voiceButton.classList.add('recording'); voiceStatus.textContent = 'Listening...'; };
         recognition.onend = () => { isRecording = false; voiceButton.classList.remove('recording'); voiceStatus.textContent = ''; };
-        recognition.onerror = (e) => { isRecording = false; voiceStatus.textContent = 'Voice error. Please try again.'; console.error('Voice Error:', e.error); };
+        recognition.onerror = (e) => { isRecording = false; voiceStatus.textContent = 'Voice error.'; console.error('Voice Error:', e.error); };
         recognition.onresult = (e) => { const transcript = e.results[0][0].transcript; sendQuery(transcript); };
-
         voiceButton.addEventListener('click', () => {
-            if (isRecording) {
-                recognition.stop();
-            } else {
-                // Let browser auto-detect language for voice
-                recognition.start();
-            }
+            if (isRecording) { recognition.stop(); } 
+            else { recognition.start(); }
         });
     } else {
         voiceButton.style.display = 'none';
     }
 
     // --- Start the App ---
+    initializeOfflineIndex();
     initDB();
 });

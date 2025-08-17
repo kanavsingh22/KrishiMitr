@@ -5,3 +5,12 @@ torch
 pandas
 numpy
 googletrans==4.0.0-rc1
+langchain
+langchain-community
+langchain-core
+faiss-cpu
+beautifulsoup4
+gnews
+python-dotenv
+google-search-results
+langchain-huggingface

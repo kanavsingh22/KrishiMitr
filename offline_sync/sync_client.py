@@ -3,90 +3,71 @@ import json
 import os
 import time
 
-class OfflineSyncClient:
-    def __init__(self, api_url, queue_file='offline_queue.json'):
+class KioskSyncClient:
+    def __init__(self, api_url, user_queue_file='offline_queue.json'):
         self.api_url = api_url
-        self.queue_file = queue_file
+        self.user_queue_file = user_queue_file
         self.queue = self._load_queue()
 
     def _is_online(self):
-        """Checks for an active internet connection."""
         try:
-            requests.get("http://www.google.com", timeout=3)
+            # Check connection to the local backend server
+            requests.get("http://127.0.0.1:5000", timeout=3)
             return True
         except requests.ConnectionError:
+            print("Kiosk is OFFLINE. Cannot connect to the main server.")
             return False
 
     def _load_queue(self):
-        """Loads pending requests from the queue file."""
-        if os.path.exists(self.queue_file):
-            with open(self.queue_file, 'r') as f:
-                return json.load(f)
+        if os.path.exists(self.user_queue_file):
+            try:
+                with open(self.user_queue_file, 'r') as f:
+                    data = json.load(f)
+                    print(f"Loaded {len(data)} messages from {self.user_queue_file} for processing.")
+                    return data
+            except json.JSONDecodeError:
+                print(f"Error: Could not read {self.user_queue_file}. It might be empty or corrupted.")
+                return []
+        print("No user queue file found. Nothing to sync.")
         return []
 
-    def _save_queue(self):
-        """Saves the current queue to a file."""
-        with open(self.queue_file, 'w') as f:
-            json.dump(self.queue, f)
+    def sync_queued_messages(self):
+        if not self._is_online():
+            print("Sync check complete. Kiosk is offline.")
+            return
+        if not self.queue:
+            print("Sync check complete. Queue is empty.")
+            return
 
-    def send_query(self, query):
-        """
-        Sends a query. If online, sends directly. If offline,
-        queues it for later.
-        """
-        if self._is_online():
-            print("Client is online. Sending query directly.")
+        print(f"Kiosk is ONLINE. Syncing {len(self.queue)} messages from the user.")
+        
+        failed_requests = []
+        for i, request_data in enumerate(self.queue):
             try:
-                response = requests.post(self.api_url, json={'query': query})
-                print(f"Server Response: {response.json()}")
+                print(f"  -> Sending ({i+1}/{len(self.queue)}): '{request_data['query']}'")
+                response = requests.post(self.api_url, json={'query': request_data['query']})
+                if response.status_code == 200:
+                    print(f"     SUCCESS. Server replied.")
+                else:
+                    print(f"     FAILED. Server returned status {response.status_code}.")
+                    failed_requests.append(request_data)
+                time.sleep(0.5) 
             except requests.RequestException as e:
-                print(f"Failed to send request even when online: {e}")
-                self._queue_request(query)
+                print(f"     ERROR sending request: {e}")
+                failed_requests.append(request_data)
+        
+        if failed_requests:
+            print(f"\n{len(failed_requests)} messages failed to send. Saving them back to the queue.")
+            with open(self.user_queue_file, 'w') as f:
+                json.dump(failed_requests, f)
         else:
-            print("Client is offline. Queuing request.")
-            self._queue_request(query)
-    
-    def _queue_request(self, query):
-        """Adds a request to the local queue."""
-        self.queue.append({'query': query, 'timestamp': time.time()})
-        self._save_queue()
-
-    def sync_pending_requests(self):
-        """
-        If online, sends all pending requests from the queue to the server.
-        """
-        if self._is_online() and self.queue:
-            print(f"Online. Found {len(self.queue)} pending requests. Syncing...")
-            
-            remaining_queue = []
-            for request_data in self.queue:
-                try:
-                    response = requests.post(self.api_url, json={'query': request_data['query']})
-                    if response.status_code == 200:
-                        print(f"Successfully synced query: {request_data['query']}")
-                    else:
-                        print(f"Failed to sync query: {request_data['query']}. Server returned {response.status_code}")
-                        remaining_queue.append(request_data) # Keep in queue
-                except requests.RequestException as e:
-                    print(f"Sync failed due to connection error: {e}")
-                    remaining_queue.append(request_data) # Keep in queue
-                    break # Stop trying if connection fails
-            
-            self.queue = remaining_queue
-            self._save_queue()
-        elif not self.queue:
-            print("No pending requests to sync.")
-        else:
-            print("Still offline. Cannot sync.")
-
+            print("\nAll messages synced successfully. Clearing the user queue file.")
+            os.remove(self.user_queue_file)
 
 if __name__ == '__main__':
-    # This is a simulation of the client's behavior
-    client = OfflineSyncClient(api_url='http://127.0.0.1:5000/api/ask')
-
-    # Simulate sending a query (run this while your internet is ON/OFF)
-    client.send_query("What is the price of onions in Delhi?")
-
-    # In a real app, this sync process would run periodically in the background
-    print("\nAttempting to sync pending requests...")
-    client.sync_pending_requests()
+    print("--- KrishiMitr Kiosk Sync Client v2.0 ---")
+    kiosk_client = KioskSyncClient(
+        api_url='http://127.0.0.1:5000/api/ask',
+        user_queue_file='frontend/offline_queue.json' 
+    )
+    kiosk_client.sync_queued_messages()

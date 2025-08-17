@@ -1,142 +1,90 @@
-# KrishiMitr: An Agentic AI Solution for Agriculture
+# KrishiMitr: An Agentic AI Solution for Agriculture (v3.0 - Live & Decentralized)
 
-Welcome to the KrishiMitr project. This repository contains the end-to-end code for a multilingual, blockchain-anchored agricultural advisor designed for India’s diverse farming ecosystem.
+This version represents a major architectural evolution, transforming KrishiMitr into a dynamic, live, and decentralized information agent.
 
-## Table of Contents
+### Core Upgrades
 
-1.  [Theme Overview](#theme-overview)
-2.  [Solution Synopsis](#solution-synopsis)
-3.  [Technical Architecture](#technical-architecture)
-4.  [Project Structure](#project-structure)
-5.  [Prerequisites](#prerequisites)
-6.  [Setup and Installation](#setup-and-installation)
-7.  [Running the Application](#running-the-application)
-8.  [How It Works](#how-it-works)
-9.  [Troubleshooting]
+1.  **Live Public Data:** The app no longer uses a static CSV. It performs live web searches (via SerpApi) and queries a live news API (GNews) to provide up-to-the-minute answers.
 
----
+2.  **Decentralized Offline Cache:** A peer-to-peer data sharing model is simulated. Online queries are cached locally with a blockchain hash. Offline users can access this shared cache, simulating getting data from a nearby device.
 
-### 1. Theme Overview
+3.  **LangChain RAG Pipeline:** The backend is now powered by LangChain, using a sophisticated chain (Web Loader -> Text Splitter -> Embeddings -> FAISS Vector Store) to provide highly relevant context for generating intelligent answers.
 
-**The Challenge:** Exploring and Building Agentic AI Solutions for a High-Impact Area of Society: Agriculture.
+### Required Setup
 
-**Benefits:**
-- Real-time, hyperlocal farm advice.
-- Multilingual, low-connectivity access.
-- Unified weather, soil, finance, and policy insights.
-- Reduced climate and market risks.
-- Inclusive support for all agri stakeholders.
+1.  **API Keys:** This version requires two free API keys.
+    *   Go to `gnews.io` to get a news API key.
+    *   Go to `serpapi.com` to get a web search API key.
 
----
+2.  **Environment File:** Create a file named `.env` in the main `KrishiMitr/` project directory. Add your keys to it:
+    ```
+    SERPAPI_API_KEY="YOUR_SERPAPI_KEY_HERE"
+    GNEWS_API_KEY="YOUR_GNEWS_API_KEY_HERE"
+    ```
 
-### 2. Solution Synopsis
+### How to Run
 
-KrishiMitr provides real-time, evidence-backed recommendations on irrigation, crop choice, pest control, and more. It combines agentic AI reasoning with blockchain-based data anchoring to ensure trust and transparency. The system is designed to be accessible even in low-connectivity environments through a voice-first interface and offline capabilities.
+1.  **Install Dependencies:**
+    ```bash
+    # Navigate to the backend folder
+    cd backend
+    # Install all required libraries
+    pip install -r requirements.txt
+    cd ..
+    ```
 
----
+2.  **Run Backend (in Terminal 1):**
+    ```bash
+    cd backend
+    python3 app.py
+    ```
 
-### 3. Technical Architecture
+3.  **Run Frontend (in Terminal 2):**
+    ```bash
+    cd frontend
+    http-server .
+    ```
 
-The architecture is composed of five layers:
+4.  **Access App:** Open your browser to `http://127.0.0.1:8080`
+    *   **Crucial:** Perform a **Hard Refresh** (`Ctrl+Shift+R` or `Cmd+Shift+R`) to clear any old files from your browser's cache.
 
-1.  **Data Ingestion & ETL Layer:** Fetches and processes data from sources like IMD (weather) and Agmarknet (market prices).
-2.  **Knowledge Base & Blockchain Anchoring Layer:** Stores curated data and anchors its cryptographic hash on a permissioned blockchain (Hyperledger Fabric simulated) for tamper-proof verification. Large files are stored on IPFS (simulated).
-3.  **AI Reasoning & RAG Layer:** A Retrieval-Augmented Generation (RAG) pipeline uses fine-tuned LLMs (e.g., LLaMA 3) to generate answers grounded in verified data, reducing hallucinations.
-4.  **Delivery & Interaction Layer:** A Progressive Web App (PWA) with a voice-first UI provides the primary interface.
-5.  **Offline Sync & P2P Mesh Layer:** A store-and-forward mechanism ensures that queries made offline are synced when connectivity is restored.
+### How to Test
 
----
+1.  **Online LangChain RAG:** Ask a specific question like "best irrigation method for sugarcane in sandy soil?". Observe the backend terminal to see the LangChain process (finding URLs, loading content). The answer will be freshly generated.
+2.  **Online Live News:** Ask "latest news on agriculture in India". The backend will query the GNews API.
+3.  **Offline P2P Simulation:**
+    *   While online, ask a specific question like "how to control whitefly in vegetable crops?". The answer is saved to a shared cache simulation.
+    *   Go offline. Ask the same question. The app will retrieve the answer instantly from the local cache, simulating a P2P exchange.
 
-### 4. Project Structure
-KrishiMitr/
-├── README.md
-├── backend/
-├── frontend/
-├── blockchain/
-├── ai_model/
-├── data_ingestion/
-└── offline_sync/
-code
-Code
-(A detailed description of each file is provided in the code sections below).
 
----
+    # KrishiMitr: An Agentic AI Solution for Agriculture (v4.0 - Intelligent & Dynamic)
 
-### 5. Prerequisites
+This version introduces the final major upgrades, focusing on response quality and creating a truly powerful and useful offline experience.
 
-- **Python 3.8+**: For backend, AI, and data ingestion.
-- **Node.js and npm**: For serving the frontend.
-- **Go 1.18+**: For the Hyperledger Fabric chaincode.
-- **A modern web browser** (like Chrome or Firefox) that supports the Web Speech API and Service Workers.
+### Core Upgrades
 
----
+1.  **Intelligent Summarization & Formatting:** The backend's LLM simulator no longer dumps raw text. It now intelligently summarizes the retrieved information, extracts key points, and formats the answer with bold titles and crisp sentences for excellent readability.
 
-### 6. Setup and Installation
+2.  **Dynamic "Learning" Offline Database:** The offline architecture has been completely redesigned. Every verified answer you receive online is now automatically saved to your device's permanent database (IndexedDB). Your app's offline knowledge grows with every use, making it an incredibly powerful, personalized tool over time.
 
-**1. Clone the repository:**
+3.  **Robust Multilingual Experience:** The app now guarantees responses in Hindi (Devanagari script) for any Hinglish or Hindi query. All offline messages, including errors, are now also displayed in the appropriate language.
 
-git clone <repository_url>
-cd KrishiMitr
-2. Backend & AI Setup:
-code
-Bash
-cd backend
-pip install -r requirements.txt
-cd ../ai_model
-pip install -r requirements.txt
-(Note: requirements.txt for the AI model is consolidated into the backend's for this project).
+### Required Setup
 
-3. Data Ingestion (One-time setup):
-Run the ETL script to process raw data and create the knowledge base for the RAG pipeline.
-code
-Bash
-cd data_ingestion
-python etl.py
-This will create a knowledge_base.csv file in the ai_model/data directory.
-4. Frontend Setup:
-This project uses a simple Node.js server to serve the frontend files.
-code
-Bash
-cd frontend
-npm install -g http-server # Install a simple server
+(Setup for API keys and `.env` file is the same as the previous version).
 
-### 7. Running the Application
-1. Start the Backend Server:
-Open a terminal and run the Flask app.
-code
-Bash
-cd backend
-python app.py
-The backend will be running at http://127.0.0.1:5000.
-2. Start the Frontend Server:
-Open a second terminal and run the HTTP server.
-code
-Bash
-cd frontend
-http-server .
-The frontend will be accessible at http://127.0.0.1:8080.
-3. Access KrishiMitr:
-Open your web browser and navigate to http://127.0.0.1:8080. You can now ask agricultural questions via text or voice.
+### How to Run
 
-### 8. How It Works
-The user asks a question on the Frontend PWA (e.g., "What is the market price for tomatoes in Delhi?").
-The request is sent to the Backend Flask server.
-The backend calls the AI RAG Pipeline, which retrieves relevant information from the knowledge_base.csv.
-The RAG pipeline generates a precise, evidence-backed answer.
-The backend creates an "evidence package" (query + answer + sources), generates its SHA256 hash, and simulates storing it on IPFS and anchoring the hash on the Blockchain.
-The backend returns the answer, sources, and the transaction hash to the frontend.
-The frontend displays the information. If the user is offline, the Service Worker serves the cached app, and the offline_sync logic (conceptual) would queue the request.
+1.  **Install Dependencies:** `pip install -r backend/requirements.txt`
+2.  **Run Backend:** `cd backend` -> `python3 app.py`
+3.  **Run Frontend:** `cd frontend` -> `http-server .`
+4.  **Access App:** `http://127.0.0.1:8080` (Hard Refresh: `Ctrl+Shift+R`)
 
-### 9. Troubleshooting
+### How to Test the New Features
 
-**Problem: The web page loads, but every query responds with "Sorry, I am having trouble connecting. Please try again later."**
+1.  **Test Summarization:** Ask a question online like "how to use urea fertilizer for wheat". The response will be a well-formatted summary, not a wall of text.
 
-This is the most common issue and it means the frontend cannot communicate with the backend. Here's how to fix it:
-
-1.  **Check the Backend Terminal:** Look at the terminal where you ran `python backend/app.py`.
-    *   If you see an error like `FileNotFoundError: [Errno 2] No such file or directory: 'ai_model/data/knowledge_base.csv'`, it means the AI's data file is missing.
-    *   **Solution:** Make sure the file `ai_model/data/knowledge_base.csv` exists. The corrected code in this guide now includes this file directly. Alternatively, you can generate it by running `python data_ingestion/etl.py`.
-
-2.  **Is the Backend Running?** Ensure you have two separate terminals open: one for the backend (`python backend/app.py`) and one for the frontend (`http-server .`). The backend must be running for the frontend to work.
-
-3.  **Check for Other Errors:** The backend terminal will show any other Python errors that might be causing it to crash. A common one is missing libraries. Make sure you have installed all requirements by running `pip install -r backend/requirements.txt`.
+2.  **Test the "Learning" Offline Mode:**
+    *   **Step 1 (Learn):** While online, ask a specific question: `what is the market price for cotton in mumbai?`. You will get a live answer.
+    *   **Step 2 (Recall):** Now, disconnect from the internet. The dot will turn red.
+    *   **Step 3 (Verify):** Ask the same question again, or a similar one like `mumbai me kapas ka bhav`. The app will instantly retrieve the perfectly formatted answer you received earlier from its permanent offline database.

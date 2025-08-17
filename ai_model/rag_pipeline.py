@@ -1,82 +1,83 @@
-import pandas as pd
-from sentence_transformers import SentenceTransformer, util
-import torch
 import os
-import sys
+from langchain_community.utilities import SerpAPIWrapper
+from langchain_community.document_loaders import WebBaseLoader
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.chains import RetrievalQA
+from langchain_community.llms.fake import FakeListLLM
 
-class RAGPipeline:
-    def __init__(self, model_name='all-MiniLM-L6-v2'):
+class LangChainRAG:
+    def __init__(self):
         """
-        Initializes the RAG pipeline.
-        - Loads a sentence transformer model.
-        - Loads and encodes the knowledge base from a CSV file.
+        Initializes the LangChain-powered RAG pipeline.
         """
-        self.model = SentenceTransformer(model_name)
-        self.knowledge_base = None
-        self.kb_embeddings = None
-        self._load_knowledge_base()
+        self.search = SerpAPIWrapper()
+        self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        self.llm = FakeListLLM(responses=["retrieved context placeholder"])
 
-    def _load_knowledge_base(self):
-        """Loads the knowledge base from the CSV file and pre-computes embeddings."""
-        kb_path = os.path.join(os.path.dirname(__file__), 'data', 'knowledge_base.csv')
+    def search_and_build_retriever(self, query: str):
+        """
+        Performs a web search, loads the content of the top result,
+        chunks the content, and builds a retriever object for similarity search.
+        """
+        print(f"\n[LangChain] Performing web search for: '{query}'")
         try:
-            self.knowledge_base = pd.read_csv(kb_path)
-            # Ensure 'content' column is string type
-            self.knowledge_base['content'] = self.knowledge_base['content'].astype(str)
-            # Pre-compute embeddings for faster retrieval
-            self.kb_embeddings = self.model.encode(self.knowledge_base['content'].tolist(), convert_to_tensor=True)
-            print("Knowledge base loaded and embeddings computed successfully.")
-        except FileNotFoundError:
-            print("="*60)
-            print(f"FATAL ERROR: Knowledge base file not found at {kb_path}.")
-            print("Please create this file by running the ETL script:")
-            print("python data_ingestion/etl.py")
-            print("="*60)
-            # Exit the application if the core data file is missing
-            sys.exit(1) 
-            
-    def retrieve(self, query, top_k=3):
-        """Retrieves the most relevant documents from the knowledge base."""
-        if self.kb_embeddings is None or len(self.kb_embeddings) == 0:
-            return pd.DataFrame() # Return empty if KB is not loaded
-            
-        query_embedding = self.model.encode(query, convert_to_tensor=True)
-        # Calculate cosine similarity
-        cos_scores = util.pytorch_cos_sim(query_embedding, self.kb_embeddings)[0]
+            # --- THIS IS THE CRITICAL FIX ---
+            # The 'num_results' argument has been removed as it is no longer supported.
+            # The function will now correctly return a dictionary of results.
+            results = self.search.results(query)
+            # --- END OF FIX ---
+        except Exception as e:
+            print(f"[LangChain] SerpAPI search failed: {e}")
+            return None, []
         
-        # Get top_k scores and their indices
-        top_results = torch.topk(cos_scores, k=min(top_k, len(self.knowledge_base)))
+        if not results or "organic_results" not in results or not results["organic_results"]:
+            print("[LangChain] Web search returned no organic results.")
+            return None, []
+
+        top_result = results["organic_results"][0]
+        url = top_result.get("link")
+        source = top_result.get("source", "Web Search")
         
-        # Return the top N most similar documents
-        retrieved_docs = self.knowledge_base.iloc[top_results.indices.cpu()]
-        return retrieved_docs
+        if not url:
+            print("[LangChain] No URL found in the top search result.")
+            return None, []
 
-    def generate_answer(self, query, retrieved_docs):
-        """
-        Generates a concise answer based on the query and retrieved documents.
-        This is a simplified "generation" step. A real LLM would be used here.
-        """
-        if retrieved_docs.empty:
-            return "I'm sorry, I could not find relevant information to answer your question.", []
+        print(f"[LangChain] Loading content from URL: {url}")
+        try:
+            loader = WebBaseLoader(url)
+            documents = loader.load()
+        except Exception as e:
+            print(f"[LangChain] Error loading URL content: {e}")
+            return None, []
 
-        # Simple heuristic: if the query is about price, extract price info. Otherwise, return the most relevant doc.
-        if "price" in query.lower() or "market" in query.lower():
-            for content in retrieved_docs['content']:
-                if "Rs." in content and any(word in content.lower() for word in query.lower().split()):
-                    return content, retrieved_docs['source'].unique().tolist()
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+        docs = text_splitter.split_documents(documents)
         
-        # Default to returning the content of the single most relevant document
-        answer = retrieved_docs.iloc[0]['content']
-        sources = retrieved_docs['source'].unique().tolist()
+        print(f"[LangChain] Creating vector store from {len(docs)} document chunks.")
+        vector_store = FAISS.from_documents(docs, self.embeddings)
+        
+        return vector_store.as_retriever(), [source]
 
-        return answer, sources
-
-    def ask(self, query):
+    def get_context(self, query: str):
         """
-        End-to-end function to handle a user query.
+        The main public method to get relevant context for a given query.
         """
-        retrieved_docs = self.retrieve(query)
-        answer, sources = self.generate_answer(query, retrieved_docs)
-        return answer, sources
+        retriever, sources = self.search_and_build_retriever(query)
+        
+        if not retriever:
+            return None, []
 
-# (The rest of the file `fine_tuning_placeholder.py` remains the same)
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=self.llm,
+            chain_type="stuff",
+            retriever=retriever,
+            return_source_documents=True
+        )
+        
+        result = qa_chain.invoke({"query": query})
+        context = " ".join([doc.page_content for doc in result["source_documents"]])
+        
+        print(f"[LangChain] Retrieved context: '{context[:200]}...'")
+        return context, sources
