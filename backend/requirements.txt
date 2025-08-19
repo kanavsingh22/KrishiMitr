@@ -21,4 +21,4 @@ time
 pandas
 sentence-transformers
 torch
-request
+requests
