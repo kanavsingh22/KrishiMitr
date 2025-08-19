@@ -15,9 +15,3 @@ python-dotenv
 google-search-results
 langchain-huggingface
 gunicorn
-json
-time
-pandas
-sentence-transformers
-torch
-requests
