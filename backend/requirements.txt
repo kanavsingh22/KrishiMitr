@@ -18,3 +18,6 @@ gunicorn
 hashlib
 json
 time
+pandas
+sentence-transformers
+torch
